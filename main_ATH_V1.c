@@ -20,6 +20,7 @@ int ot;
 int i;
 int CheckSum(char *word,int previous);
 void Configuracion(void);
+int GetSignal(int intentos_signal_max);
 void interrupt isr() 
 { //reset the interrupt flag 
     if (INTCONbits.INTF) 
@@ -84,18 +85,13 @@ void main(void)
 {
     
     unsigned char config=0x3C;      //Config word for OpenUSART function
-    char h;
-    int c;
-    int task=0;                     //Variable for reading each x second the signal strength
-    int r=0;
-    int c1=0;                       //Variable for the different LED times
-    char g;
-    int signal=1;                   //Variable for signal change after the LED cycle
-    int signala=1;
     int prendido=1;
-    int intentos_signal_max=3;
-    int intentos_signal_actual=0;
+    int try_signal_max=3;
+    int signala2=1;
+    int task=0;
     
+    int signal=1;                   //Variable for signal change after the LED cycle
+    int c1=0;
     Configuracion();                //Configurate ports, Timers etc.
     OpenUSART(config,34);           //Opens UART module
     cleanUSART();                   //Cleans Usart before usig it
@@ -109,6 +105,142 @@ void main(void)
             TMR2IF=0;               //Clear Flag
             if(task==0 & prendido==1)             //Only check signal after x seconds
             {
+                signala2=GetSignal(try_signal_max);
+            }
+            sen:            // LED routines
+            if(signal==1)   //Signal low
+            {
+                    TMR2IF=0;
+                    if(c1==0)   //First time, Turn On led
+                    {
+                        RA2=1;
+                        c1=c1+1;
+                    }
+
+                    else if(c1<9 & c1!=0)//After, Turn Of Led
+                    {
+                        RA2=0;
+                        
+                        c1=c1+1;
+                    }
+                    else if (c1==9)
+                    {
+                        c1=0;       //Reset cycle
+                        signal=signala2;//Reload signal variable 
+                    }
+
+                
+
+            }
+
+            else if(signal==2)  //Signal medium
+            {
+                
+                    TMR2IF=0;
+                    if(c1==0 | c1==2) //Two led flashes
+                    {
+                        RA2=1;
+                        c1=c1+1;
+                    }
+                    else if(c1==1 | c1<9)//Turn Off Led
+                    {
+                        RA2=0;
+                        c1=c1+1;
+                    }
+                    else
+                    {
+                        RA2=0;  
+                        c1=0;   //Reset cycle
+                        signal=signala2;//Reload signal variable 
+                    }
+                
+            }
+            else if(signal==3)
+            {
+                    TMR2IF=0;
+                    if(c1==0 | c1==2 | c1==4) //Three Led Flashes
+                    {
+                        RA2=1;
+                        c1=c1+1;
+                    }
+                    else if(c1==1 |c1==3| c1<9)//Turn Off Led
+                    {
+                        RA2=0;
+                        c1=c1+1;
+                    }
+                    else
+                    {
+                        RA2=0;
+                        c1=0;       //Reset cycle
+                        signal=signala2;//Reload signal variable
+                    }
+                
+            }
+            task=task+1;    //Count task
+            if(task==8)     //8 is the number of timer cycles it waits for checking signal strength
+            {
+                task=0;     //After that, reset task
+            }
+        }
+       
+    }
+    return;
+}
+void Configuracion(void)
+{
+    WDTCONbits.WDTPS4=0;            //WDT 32 seconds
+    WDTCONbits.WDTPS3=1;
+    WDTCONbits.WDTPS2=1;
+    WDTCONbits.WDTPS1=1;
+    WDTCONbits.WDTPS0=1;
+    WDTCONbits.SWDTEN=1;            //WDT enable
+    CLRWDT();
+    
+    APFCON0bits.RXDTSEL=0;          // Keep TX and RX in original pins. RB1 and RB2
+    APFCON1bits.TXCKSEL=0;
+    TRISBbits.TRISB1=1;             //Port Configuration        
+    TRISBbits.TRISB2=0;
+    TRISBbits.TRISB3=1;   
+    TRISAbits.TRISA2=0;
+    PORTAbits.RA2=0;
+    ANSA2=0;
+    ANSELB=0x00;
+                                    //Oscillator configuration
+    OSCCONbits.SCS1=1;              //Internal oscillator clock
+    OSCCONbits.IRCF3=1;             //16 Mhz clock
+    OSCCONbits.IRCF2=1;
+    OSCCONbits.IRCF1=1;
+    OSCCONbits.IRCF0=1; 
+                                    //Timer 2 configuration
+    T2CONbits.T2OUTPS3=1;           //1:16 Postcaler
+    T2CONbits.T2OUTPS2=1;
+    T2CONbits.T2OUTPS1=1;
+    T2CONbits.T2OUTPS0=1;
+    T2CONbits.T2CKPS1=1;            //1:16 Prescaler
+    T2CONbits.T2CKPS0=1;                
+    PR2=0xff;
+    T2CONbits.TMR2ON=1;             //T2ON  
+    
+    INTCONbits.INTF = 0; //reset the external interrupt flag 
+    OPTION_REGbits.INTEDG = 0; //interrupt on the rising edge 
+    INTCONbits.INTE = 1; //enable the external interrupt 
+    INTCONbits.GIE = 1;///set the Global Interrupt Enable
+    
+    TMR2IF=0;                       //Clearing Flags
+    PIR1=0x00;
+    OSFIF=0;
+}
+int GetSignal(int intentos_signal_max)
+{
+    int intentos_signal_actual=0;
+    char h;
+    int c;                    //Variable for reading each x second the signal strength
+    int r=0;
+                          //Variable for the different LED times
+    char g;
+     
+    int signala=1;
+    
                 cleanUSART();       //Avoiding overrun error
                 putsUSART("AT+CSQ\r\n");//Signal request
                 while(BusyUSART());
@@ -224,7 +356,7 @@ void main(void)
                         {
                             intentos_signal_actual=0;
                             signala=1;
-                            goto sen;
+                            goto chao;
                         }
                         else
                         {
@@ -236,129 +368,9 @@ void main(void)
                     goto ReadInicial;
                 }
                 
-            }
-            sen:            // LED routines
-            if(signal==1)   //Signal low
-            {
-                    TMR2IF=0;
-                    if(c1==0)   //First time, Turn On led
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
-
-                    else if(c1<9 & c1!=0)//After, Turn Of Led
-                    {
-                        RA2=0;
-                        
-                        c1=c1+1;
-                    }
-                    else if (c1==9)
-                    {
-                        c1=0;       //Reset cycle
-                        signal=signala;//Reload signal variable 
-                    }
-
-                
-
-            }
-
-            else if(signal==2)  //Signal medium
-            {
-                
-                    TMR2IF=0;
-                    if(c1==0 | c1==2) //Two led flashes
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
-                    else if(c1==1 | c1<9)//Turn Off Led
-                    {
-                        RA2=0;
-                        c1=c1+1;
-                    }
-                    else
-                    {
-                        RA2=0;  
-                        c1=0;   //Reset cycle
-                        signal=signala;//Reload signal variable 
-                    }
-                
-            }
-            else if(signal==3)
-            {
-                    TMR2IF=0;
-                    if(c1==0 | c1==2 | c1==4) //Three Led Flashes
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
-                    else if(c1==1 |c1==3| c1<9)//Turn Off Led
-                    {
-                        RA2=0;
-                        c1=c1+1;
-                    }
-                    else
-                    {
-                        RA2=0;
-                        c1=0;       //Reset cycle
-                        signal=signala;//Reload signal variable
-                    }
-                
-            }
-            task=task+1;    //Count task
-            if(task==8)     //8 is the number of timer cycles it waits for checking signal strength
-            {
-                task=0;     //After that, reset task
-            }
-        }
-       
-    }
-    return;
-}
-void Configuracion(void)
-{
-    WDTCONbits.WDTPS4=0;            //WDT 32 seconds
-    WDTCONbits.WDTPS3=1;
-    WDTCONbits.WDTPS2=1;
-    WDTCONbits.WDTPS1=1;
-    WDTCONbits.WDTPS0=1;
-    WDTCONbits.SWDTEN=1;            //WDT enable
-    CLRWDT();
-    
-    APFCON0bits.RXDTSEL=0;          // Keep TX and RX in original pins. RB1 and RB2
-    APFCON1bits.TXCKSEL=0;
-    TRISBbits.TRISB1=1;             //Port Configuration        
-    TRISBbits.TRISB2=0;
-    TRISBbits.TRISB3=1;   
-    TRISAbits.TRISA2=0;
-    PORTAbits.RA2=0;
-    ANSA2=0;
-    ANSELB=0x00;
-                                    //Oscillator configuration
-    OSCCONbits.SCS1=1;              //Internal oscillator clock
-    OSCCONbits.IRCF3=1;             //16 Mhz clock
-    OSCCONbits.IRCF2=1;
-    OSCCONbits.IRCF1=1;
-    OSCCONbits.IRCF0=1; 
-                                    //Timer 2 configuration
-    T2CONbits.T2OUTPS3=1;           //1:16 Postcaler
-    T2CONbits.T2OUTPS2=1;
-    T2CONbits.T2OUTPS1=1;
-    T2CONbits.T2OUTPS0=1;
-    T2CONbits.T2CKPS1=1;            //1:16 Prescaler
-    T2CONbits.T2CKPS0=1;                
-    PR2=0xff;
-    T2CONbits.TMR2ON=1;             //T2ON  
-    
-    INTCONbits.INTF = 0; //reset the external interrupt flag 
-    OPTION_REGbits.INTEDG = 0; //interrupt on the rising edge 
-    INTCONbits.INTE = 1; //enable the external interrupt 
-    INTCONbits.GIE = 1;///set the Global Interrupt Enable
-    
-    TMR2IF=0;                       //Clearing Flags
-    PIR1=0x00;
-    OSFIF=0;
+            
+    chao:
+    return signala;
 }
 int CheckSum(char *word,int previous)
 {
