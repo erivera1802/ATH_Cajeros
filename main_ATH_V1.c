@@ -21,17 +21,19 @@ int i;
 int signal=1;
 int signala2=1;
 int c1=0;
+//Prototypes
 int CheckSum(char *word,int previous);
 void Configuracion(void);
 int GetSignal(int intentos_signal_max);
 void LedSignal();
+//Interrupt
 void interrupt isr() 
-{ //reset the interrupt flag 
+{  
     if (INTCONbits.INTF) 
     {
-        INTF=0;
+        INTF=0;             //reset the interrupt flag
         RA2=1;
-        __delay_ms(100);    //Para saber que está en interrupción
+        __delay_ms(100);    //Led on for an Human-visible Timw
         __delay_ms(100);
         __delay_ms(100);
         __delay_ms(100);
@@ -44,32 +46,46 @@ void interrupt isr()
         int intentos=3;
         int iactual=0;
         int got=0;
+        int sendok=0;
         if(ot==1)
         {
-            ot=OpenTCPIP("181.58.30.155","23");
+            ot=OpenTCPIP("181.58.30.155","23");//Open socket
             if(ot==1)
             {
                 for(i=1;i<12;i++)
                 {
                     num=ReadEEPROM(i);
-                    numero[i-1]=num;
+                    numero[i-1]=num;    //Read Number form EEPROM
                 }
                 ReenviarTCPIP:
-                SendATCPIP(numero,11);
+                /*SendATCPIP(numero,11); //Send array
+                checksum=CheckSum(numero,checksum);//Calculate checksum
+                SendcTCPIP(checksum);  //Send Checksum
+                got=WaitForChar(checksum,200,2);*///Hat for checksum back
+                CommandSend();
+                for(i=1;i<12;i++)
+                {
+                    WriteUSART(numero[i-1]);    //Read Number form EEPROM
+                    while(BusyUSART());
+                }
                 checksum=CheckSum(numero,checksum);
-                SendcTCPIP(checksum);
-                got=WaitForChar(checksum,200,2);
+                cleanUSART();
+                WriteUSART(checksum);
+                sendok=CommandEnd();
+                while(BusyUSART());
+
+                got=WaitForChar(checksum,200,2);//Hat for checksum back*/
                 checksum=0;
                 if(got==1)
                 {
-                    iactual=0;
+                    iactual=0;  //If checksum was received, get out
                 }
                 else
                 {
                     if(iactual<=intentos)
                     {
                         iactual++;
-                        goto ReenviarTCPIP;
+                        goto ReenviarTCPIP; //Try again, but only intentos+1 times
                     }
                     else
                     {
