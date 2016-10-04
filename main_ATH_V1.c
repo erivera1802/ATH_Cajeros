@@ -19,6 +19,7 @@
 int ot;
 int i;
 int CheckSum(char *word,int previous);
+void Configuracion(void);
 void interrupt isr() 
 { //reset the interrupt flag 
     if (INTCONbits.INTF) 
@@ -81,50 +82,8 @@ void interrupt isr()
 }
 void main(void) 
 {
-    WDTCONbits.WDTPS4=0;            //WDT 32 seconds
-    WDTCONbits.WDTPS3=1;
-    WDTCONbits.WDTPS2=1;
-    WDTCONbits.WDTPS1=1;
-    WDTCONbits.WDTPS0=1;
-    WDTCONbits.SWDTEN=1;            //WDT enable
-    CLRWDT();
     
-    APFCON0bits.RXDTSEL=0;          // Keep TX and RX in original pins. RB1 and RB2
-    APFCON1bits.TXCKSEL=0;
-    TRISBbits.TRISB1=1;             //Port Configuration        
-    TRISBbits.TRISB2=0;
-    TRISBbits.TRISB3=1;   
-    TRISAbits.TRISA2=0;
-    PORTAbits.RA2=0;
-    ANSA2=0;
-    ANSELB=0x00;
-                                    //Oscillator configuration
-    OSCCONbits.SCS1=1;              //Internal oscillator clock
-    OSCCONbits.IRCF3=1;             //16 Mhz clock
-    OSCCONbits.IRCF2=1;
-    OSCCONbits.IRCF1=1;
-    OSCCONbits.IRCF0=1; 
-                                    //Timer 2 configuration
-    T2CONbits.T2OUTPS3=1;           //1:16 Postcaler
-    T2CONbits.T2OUTPS2=1;
-    T2CONbits.T2OUTPS1=1;
-    T2CONbits.T2OUTPS0=1;
-    T2CONbits.T2CKPS1=1;            //1:16 Prescaler
-    T2CONbits.T2CKPS0=1;                
-    PR2=0xff;
-    T2CONbits.TMR2ON=1;             //T2ON  
-    
-    INTCONbits.INTF = 0; //reset the external interrupt flag 
-    OPTION_REGbits.INTEDG = 0; //interrupt on the rising edge 
-    INTCONbits.INTE = 1; //enable the external interrupt 
-    INTCONbits.GIE = 1;///set the Global Interrupt Enable
-    
-    TMR2IF=0;                       //Clearing Flags
-    PIR1=0x00;
-    OSFIF=0;
     unsigned char config=0x3C;      //Config word for OpenUSART function
-    OpenUSART(config,34);
-    cleanUSART();
     char h;
     int c;
     int task=0;                     //Variable for reading each x second the signal strength
@@ -134,8 +93,14 @@ void main(void)
     int signal=1;                   //Variable for signal change after the LED cycle
     int signala=1;
     int prendido=1;
-    ot=InitTCPIP(10,2,"internet.movistar.com.co");
-    WritesEEPROM("3142430050",1);
+    int intentos_signal_max=3;
+    int intentos_signal_actual=0;
+    
+    Configuracion();                //Configurate ports, Timers etc.
+    OpenUSART(config,34);           //Opens UART module
+    cleanUSART();                   //Cleans Usart before usig it
+    ot=InitTCPIP(10,2,"internet.movistar.com.co");//Initialize TCPIP communication with Movistar SIM CARD
+    WritesEEPROM("3142430050",1);       //Write number in EEPROM
     
     while(1)
     {
@@ -252,6 +217,22 @@ void main(void)
                 }
                 else //Keep waitinf for data in USART
                 {   
+                    if(TMR2IF==1)
+                    {
+                        TMR2IF=0;
+                        if(intentos_signal_actual==intentos_signal_max)
+                        {
+                            intentos_signal_actual=0;
+                            signala=1;
+                            goto sen;
+                        }
+                        else
+                        {
+                            intentos_signal_actual++;
+                            goto ReadInicial;
+                        }
+                            
+                    }
                     goto ReadInicial;
                 }
                 
@@ -335,7 +316,50 @@ void main(void)
     }
     return;
 }
-
+void Configuracion(void)
+{
+    WDTCONbits.WDTPS4=0;            //WDT 32 seconds
+    WDTCONbits.WDTPS3=1;
+    WDTCONbits.WDTPS2=1;
+    WDTCONbits.WDTPS1=1;
+    WDTCONbits.WDTPS0=1;
+    WDTCONbits.SWDTEN=1;            //WDT enable
+    CLRWDT();
+    
+    APFCON0bits.RXDTSEL=0;          // Keep TX and RX in original pins. RB1 and RB2
+    APFCON1bits.TXCKSEL=0;
+    TRISBbits.TRISB1=1;             //Port Configuration        
+    TRISBbits.TRISB2=0;
+    TRISBbits.TRISB3=1;   
+    TRISAbits.TRISA2=0;
+    PORTAbits.RA2=0;
+    ANSA2=0;
+    ANSELB=0x00;
+                                    //Oscillator configuration
+    OSCCONbits.SCS1=1;              //Internal oscillator clock
+    OSCCONbits.IRCF3=1;             //16 Mhz clock
+    OSCCONbits.IRCF2=1;
+    OSCCONbits.IRCF1=1;
+    OSCCONbits.IRCF0=1; 
+                                    //Timer 2 configuration
+    T2CONbits.T2OUTPS3=1;           //1:16 Postcaler
+    T2CONbits.T2OUTPS2=1;
+    T2CONbits.T2OUTPS1=1;
+    T2CONbits.T2OUTPS0=1;
+    T2CONbits.T2CKPS1=1;            //1:16 Prescaler
+    T2CONbits.T2CKPS0=1;                
+    PR2=0xff;
+    T2CONbits.TMR2ON=1;             //T2ON  
+    
+    INTCONbits.INTF = 0; //reset the external interrupt flag 
+    OPTION_REGbits.INTEDG = 0; //interrupt on the rising edge 
+    INTCONbits.INTE = 1; //enable the external interrupt 
+    INTCONbits.GIE = 1;///set the Global Interrupt Enable
+    
+    TMR2IF=0;                       //Clearing Flags
+    PIR1=0x00;
+    OSFIF=0;
+}
 int CheckSum(char *word,int previous)
 {
     int sum=previous;
