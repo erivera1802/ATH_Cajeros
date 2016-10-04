@@ -18,16 +18,20 @@
 #include "EEPROM.h"
 int ot;
 int i;
+int signal=1;
+int signala2=1;
+int c1=0;
 int CheckSum(char *word,int previous);
 void Configuracion(void);
 int GetSignal(int intentos_signal_max);
+void LedSignal();
 void interrupt isr() 
 { //reset the interrupt flag 
     if (INTCONbits.INTF) 
     {
         INTF=0;
         RA2=1;
-        __delay_ms(100);
+        __delay_ms(100);    //Para saber que está en interrupción
         __delay_ms(100);
         __delay_ms(100);
         __delay_ms(100);
@@ -85,97 +89,27 @@ void main(void)
 {
     
     unsigned char config=0x3C;      //Config word for OpenUSART function
-    int prendido=1;
-    int try_signal_max=3;
-    int signala2=1;
-    int task=0;
+    int prendido=1;                 //Modem off or on
+    int try_signal_max=3;           //Max number of attempts to check for signal
+    int task=0;                     //Variable for signal change after the LED cycle
     
-    int signal=1;                   //Variable for signal change after the LED cycle
-    int c1=0;
     Configuracion();                //Configurate ports, Timers etc.
     OpenUSART(config,34);           //Opens UART module
     cleanUSART();                   //Cleans Usart before usig it
-    ot=InitTCPIP(10,2,"internet.movistar.com.co");//Initialize TCPIP communication with Movistar SIM CARD
-    WritesEEPROM("3142430050",1);       //Write number in EEPROM
+    ot=InitTCPIP(10,2,"internet.movistar.com.co");//Initialize TCPIP communication with Movistar SIM CARD, 10 attempts
+    WritesEEPROM("3142430050",1);       //Write number in EEPROM, position 1.
     
     while(1)
     {
         if(TMR2IF==1)               //When timer is overflow
         {
             TMR2IF=0;               //Clear Flag
-            if(task==0 & prendido==1)             //Only check signal after x seconds
+            if(task==0 & prendido==1)             //Only check signal after 8 timer2 cycles and the module is on
             {
-                signala2=GetSignal(try_signal_max);
+                signala2=GetSignal(try_signal_max);//Ask for signal strength
             }
-            sen:            // LED routines
-            if(signal==1)   //Signal low
-            {
-                    TMR2IF=0;
-                    if(c1==0)   //First time, Turn On led
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
-
-                    else if(c1<9 & c1!=0)//After, Turn Of Led
-                    {
-                        RA2=0;
-                        
-                        c1=c1+1;
-                    }
-                    else if (c1==9)
-                    {
-                        c1=0;       //Reset cycle
-                        signal=signala2;//Reload signal variable 
-                    }
-
-                
-
-            }
-
-            else if(signal==2)  //Signal medium
-            {
-                
-                    TMR2IF=0;
-                    if(c1==0 | c1==2) //Two led flashes
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
-                    else if(c1==1 | c1<9)//Turn Off Led
-                    {
-                        RA2=0;
-                        c1=c1+1;
-                    }
-                    else
-                    {
-                        RA2=0;  
-                        c1=0;   //Reset cycle
-                        signal=signala2;//Reload signal variable 
-                    }
-                
-            }
-            else if(signal==3)
-            {
-                    TMR2IF=0;
-                    if(c1==0 | c1==2 | c1==4) //Three Led Flashes
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
-                    else if(c1==1 |c1==3| c1<9)//Turn Off Led
-                    {
-                        RA2=0;
-                        c1=c1+1;
-                    }
-                    else
-                    {
-                        RA2=0;
-                        c1=0;       //Reset cycle
-                        signal=signala2;//Reload signal variable
-                    }
-                
-            }
+            
+            LedSignal();            // LED routines
             task=task+1;    //Count task
             if(task==8)     //8 is the number of timer cycles it waits for checking signal strength
             {
@@ -234,9 +168,8 @@ int GetSignal(int intentos_signal_max)
 {
     int intentos_signal_actual=0;
     char h;
-    int c;                    //Variable for reading each x second the signal strength
+    int c;                    
     int r=0;
-                          //Variable for the different LED times
     char g;
      
     int signala=1;
@@ -371,6 +304,77 @@ int GetSignal(int intentos_signal_max)
             
     chao:
     return signala;
+}
+void LedSignal()
+{
+    if(signal==1)   //Signal low
+            {
+                    TMR2IF=0;
+                    if(c1==0)   //First time, Turn On led
+                    {
+                        RA2=1;
+                        c1=c1+1;
+                    }
+
+                    else if(c1<9 & c1!=0)//After, Turn Of Led
+                    {
+                        RA2=0;
+                        
+                        c1=c1+1;
+                    }
+                    else if (c1==9)
+                    {
+                        c1=0;       //Reset cycle
+                        signal=signala2;//Reload signal variable 
+                    }
+
+                
+
+            }
+
+            else if(signal==2)  //Signal medium
+            {
+                
+                    TMR2IF=0;
+                    if(c1==0 | c1==2) //Two led flashes
+                    {
+                        RA2=1;
+                        c1=c1+1;
+                    }
+                    else if(c1==1 | c1<9)//Turn Off Led
+                    {
+                        RA2=0;
+                        c1=c1+1;
+                    }
+                    else
+                    {
+                        RA2=0;  
+                        c1=0;   //Reset cycle
+                        signal=signala2;//Reload signal variable 
+                    }
+                
+            }
+            else if(signal==3)
+            {
+                    TMR2IF=0;
+                    if(c1==0 | c1==2 | c1==4) //Three Led Flashes
+                    {
+                        RA2=1;
+                        c1=c1+1;
+                    }
+                    else if(c1==1 |c1==3| c1<9)//Turn Off Led
+                    {
+                        RA2=0;
+                        c1=c1+1;
+                    }
+                    else
+                    {
+                        RA2=0;
+                        c1=0;       //Reset cycle
+                        signal=signala2;//Reload signal variable
+                    }
+                
+            }
 }
 int CheckSum(char *word,int previous)
 {
