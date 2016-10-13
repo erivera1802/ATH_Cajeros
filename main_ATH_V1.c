@@ -11,26 +11,33 @@
 #include <stdlib.h>
 #define _XTAL_FREQ 16000000
 #pragma config FOSC = INTOSC        //Internal Oscillator Operation
-#pragma config WDTE = OFF        // Watchdog Timer Enable (Controlled by SWDTEN Register)
+#pragma config WDTE = SWDTEN        // Watchdog Timer Enable (Controlled by SWDTEN Register)
 #pragma config CLKOUTEN = ON        // Clock Out Enable (CLKOUT function is enabled on the CLKOUT pin)
 #include "USART.h"
 #include "TCPIP.h"
 #include "EEPROM.h"
+#include "M95Commands.h"
 int ot;
 int i;
 int signal=1;
 int signala2=1;
 int c1=0;
+int cycles_per_signal=15;
 //Prototypes
 int CheckSum(char *word,int previous);
 void Configuracion(void);
 int GetSignal(int intentos_signal_max);
 void LedSignal();
+void SaveNumberEEPROM(int position);
+void SaveHourEEPROM(int position);
+void PreguntarNumero(int indicesms);
+void PreguntarHora(int indicesms);
 //Interrupt
 void interrupt isr() 
 {  
     if (INTCONbits.INTF) 
     {
+        CLRWDT();
         INTF=0;             //reset the interrupt flag
         RA2=1;
         __delay_ms(100);    //Led on for an Human-visible Timw
@@ -47,6 +54,7 @@ void interrupt isr()
         int iactual=0;
         int got=0;
         int sendok=0;
+        int sms;
         if(ot==1)
         {
             ot=OpenTCPIP("181.58.30.155","23");//Open socket
@@ -62,7 +70,7 @@ void interrupt isr()
                 checksum=CheckSum(numero,checksum);//Calculate checksum
                 SendcTCPIP(checksum);  //Send Checksum
                 got=WaitForChar(checksum,200,2);*///Hat for checksum back
-                CommandSend();
+                CommandSendTCPIP();
                 for(i=1;i<12;i++)
                 {
                     WriteUSART(numero[i-1]);    //Read Number form EEPROM
@@ -71,9 +79,9 @@ void interrupt isr()
                 checksum=CheckSum(numero,checksum);
                 cleanUSART();
                 WriteUSART(checksum);
-                sendok=CommandEnd();
+                sendok=CommandEndTCPIP();
                 while(BusyUSART());
-
+                CLRWDT();
                 got=WaitForChar(checksum,200,2);//Hat for checksum back*/
                 checksum=0;
                 if(got==1)
@@ -96,6 +104,12 @@ void interrupt isr()
             
             ot=CloseTCPIP();
             INTF=0;
+            sms=CommandSendSMS("3142430050");
+            cleanUSART();
+            putsUSART("Hallo mein Nigga");
+            while(BusyUSART());
+            sms=CommandEndSMS(200);
+            CLRWDT();
         }
     }
     
@@ -103,31 +117,60 @@ void interrupt isr()
 }
 void main(void) 
 {
-    
+    CLRWDT();
     unsigned char config=0x3C;      //Config word for OpenUSART function
     int prendido=1;                 //Modem off or on
     int try_signal_max=3;           //Max number of attempts to check for signal
     int task=0;                     //Variable for signal change after the LED cycle
-    
+    int cre=0;
+    int residuo1=0;
+    int residuo2=0;
+    int checknum=0;
     Configuracion();                //Configurate ports, Timers etc.
     OpenUSART(config,34);           //Opens UART module
     cleanUSART();                   //Cleans Usart before usig it
     ot=InitTCPIP(10,2,"internet.movistar.com.co");//Initialize TCPIP communication with Movistar SIM CARD, 10 attempts
-    WritesEEPROM("3142430050",1);       //Write number in EEPROM, position 1.
-    
+    //WritesEEPROM("3142430050",1);       //Write number in EEPROM, position 1.
+    cre=CheckCREG(3);
+    cre=ConfigSMS();
+    if(cre==1)
+    {
+        RA2=1;
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        RA2=0;
+    }
+    CLRWDT();
     while(1)
     {
         if(TMR2IF==1)               //When timer is overflow
         {
+            CLRWDT();
             TMR2IF=0;               //Clear Flag
-            if(task==0 & prendido==1)             //Only check signal after 8 timer2 cycles and the module is on
+            residuo1=task%8;
+            if(residuo1==0)             //Only check signal after 8 timer2 cycles and the module is on
             {
                 signala2=GetSignal(try_signal_max);//Ask for signal strength
             }
             
+            residuo2=task%80;
+            if(residuo1==0 & residuo2==0)
+            {
+                __delay_ms(10);
+            }
+            if(residuo2==0)             //Only check signal after 8 timer2 cycles and the module is on
+            {
+                PreguntarNumero(1);
+                PreguntarHora(2);
+            }
             LedSignal();            // LED routines
             task=task+1;    //Count task
-            if(task==8)     //8 is the number of timer cycles it waits for checking signal strength
+            if(task==240)     //8 is the number of timer cycles it waits for checking signal strength
             {
                 task=0;     //After that, reset task
             }
@@ -180,147 +223,7 @@ void Configuracion(void)
     PIR1=0x00;
     OSFIF=0;
 }
-int GetSignal(int intentos_signal_max)
-{
-    int intentos_signal_actual=0;
-    char h;
-    int c;                    
-    int r=0;
-    char g;
-     
-    int signala=1;
-    
-                cleanUSART();       //Avoiding overrun error
-                putsUSART("AT+CSQ\r\n");//Signal request
-                while(BusyUSART());
-                ReadInicial:
-                if( DataRdyUSART)       //Wait for response 
-                {   
-                    rt:
-                    r=0;
 
-                    c=ReadUSART();         //Get characters
-                    //c=',';
-                    if(c==' ')              //When I get space, I am ready for the signal
-                    {
-                        
-                        Read:
-                        if(DataRdyUSART==1) //Wait till next character
-                        {
-                            h=ReadUSART();
-                            if(h=='1')      //Check for an 1
-                            {
-                                NOP();
-                                Read2:
-                                if(DataRdyUSART==1)//Wait till next character
-                                {
-                                    g=ReadUSART();
-                                    if(g==','|g=='0'|g=='1'|g=='2'|g=='3'|g=='4')//Check for 1,10,11,12,13,14
-                                    {
-                                        signala=1;  // Signal Low
-                                    }
-                                    else                                           //Check for 15,16,17,18,19
-                                    {
-                                        signala=2;  // Signal medium
-                                    }
-                                }
-                                else
-                                {
-                                    goto Read2; //Keep waiting for character (Get out through WDT!)
-                                }
-                            }
-                            else if(h=='2') //Check if 2
-                            {
-                                Read3:
-                                if(DataRdyUSART==1)//Wait till next character
-                                {
-                                    g=ReadUSART();
-                                    if(g==',')      //Check for 2
-                                    {
-                                        signala=1;  //Signal low
-                                    }
-                                    else if(g=='0'|g=='1'|g=='2'|g=='3'|g=='4')//Check for 20,21,22,23,24
-                                    {
-                                        signala=2;  //Signal medium
-                                    }
-                                    else                                        // Check for 25,26,27,28,29,30
-                                    {
-                                        signala=3;  //Signal High
-                                    }
-                                }
-                                else        //Keep waiting for character (Get out through WDT!)
-                                {
-                                    goto Read3;
-                                }
-                            }
-                            else if(h=='3')     //Check for 3
-                            {
-                                Read4:
-                                if(DataRdyUSART==1)//Wait till next character
-                                {
-                                    g=ReadUSART();
-                                    if(g==',')      //Check for 3
-                                    {
-                                        signala=1; //Signal Low 
-                                    }
-                                    else           //Check for 30,31 
-                                    {
-                                        signala=3; //Signal High
-                                    }
-                                }
-                                else  //Keep waiting for character (Get out through WDT!)
-                                {
-                                    goto Read4;
-                                }
-                            }
-                            else //Didnt found accepted character, signal low
-                            {
-                                signala=1;
-                                //RC0=1;
-                            }
-
-                        }
-                        else    //Keep waiting after space
-                        {
-                            goto Read;
-                        }
-                        
-
-
-                    }
-                    else //Keep waiting for space
-                    {
-                        goto ReadInicial;
-                    }
-
-
-
-                }
-                else //Keep waitinf for data in USART
-                {   
-                    if(TMR2IF==1)
-                    {
-                        TMR2IF=0;
-                        if(intentos_signal_actual==intentos_signal_max)
-                        {
-                            intentos_signal_actual=0;
-                            signala=1;
-                            goto chao;
-                        }
-                        else
-                        {
-                            intentos_signal_actual++;
-                            goto ReadInicial;
-                        }
-                            
-                    }
-                    goto ReadInicial;
-                }
-                
-            
-    chao:
-    return signala;
-}
 void LedSignal()
 {
     if(signal==1)   //Signal low
@@ -332,13 +235,13 @@ void LedSignal()
                         c1=c1+1;
                     }
 
-                    else if(c1<9 & c1!=0)//After, Turn Of Led
+                    else if(c1<cycles_per_signal & c1!=0)//After, Turn Of Led
                     {
                         RA2=0;
                         
                         c1=c1+1;
                     }
-                    else if (c1==9)
+                    else if (c1==cycles_per_signal)
                     {
                         c1=0;       //Reset cycle
                         signal=signala2;//Reload signal variable 
@@ -357,7 +260,7 @@ void LedSignal()
                         RA2=1;
                         c1=c1+1;
                     }
-                    else if(c1==1 | c1<9)//Turn Off Led
+                    else if(c1==1 | c1<cycles_per_signal)//Turn Off Led
                     {
                         RA2=0;
                         c1=c1+1;
@@ -378,7 +281,24 @@ void LedSignal()
                         RA2=1;
                         c1=c1+1;
                     }
-                    else if(c1==1 |c1==3| c1<9)//Turn Off Led
+                    else if(c1==1 |c1==3| c1<cycles_per_signal)//Turn Off Led
+                    {
+                        RA2=0;
+                        c1=c1+1;
+                    }
+                    else
+                    {
+                        RA2=0;
+                        c1=0;       //Reset cycle
+                        signal=signala2;//Reload signal variable
+                    }
+                
+            }
+    
+    else if(signal==0)
+            {
+                    TMR2IF=0;
+                    if(c1<cycles_per_signal)//Turn Off Led
                     {
                         RA2=0;
                         c1=c1+1;
@@ -402,4 +322,89 @@ int CheckSum(char *word,int previous)
         word++;
     }
     return sum;
+}
+void SaveNumberEEPROM(int position)
+{
+    int j=0;
+    char c;
+    char array[10];
+    for(j=0;j<10;j++)
+    {
+        fst:
+        if(RCIF)
+        {
+           c=ReadUSART();
+           array[j]=c;
+        }
+        else
+        {
+            goto fst;
+        }
+    }
+    WritesEEPROM(array,position);
+}
+
+void SaveHourEEPROM(int position)
+{
+    int j=0;
+    char c;
+    char array[6];
+    for(j=0;j<6;j++)
+    {
+        fst:
+        if(RCIF)
+        {
+           c=ReadUSART();
+           array[j]=c;
+        }
+        else
+        {
+            goto fst;
+        }
+    }
+    WritesEEPROM(array,position);
+}
+
+
+
+void PreguntarNumero(int indicesms)
+{
+    int checknum=0;
+    cleanUSART();
+    ReadSMS(indicesms);
+    checknum=WaitForString("NUM",20,200,2);
+    //check=WaitForChar('R',20,2);
+    if(checknum==1)
+    {
+        SaveNumberEEPROM(16);
+        RA2=1;
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+       RA2=0;
+    }
+                
+}
+
+void PreguntarHora(int indicesms)
+{
+    int checknum=0;
+    cleanUSART();
+    ReadSMS(indicesms);
+    checknum=WaitForString("HORA",20,200,2);
+    //check=WaitForChar('R',20,2);
+    if(checknum==1)
+    {
+        SaveNumberEEPROM(0x20);
+        RA2=1;
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+       RA2=0;
+    }
+                
 }
