@@ -14,7 +14,6 @@
 #pragma config WDTE = SWDTEN        // Watchdog Timer Enable (Controlled by SWDTEN Register)
 #pragma config CLKOUTEN = ON        // Clock Out Enable (CLKOUT function is enabled on the CLKOUT pin)
 #include "USART.h"
-#include "TCPIP.h"
 #include "EEPROM.h"
 #include "M95Commands.h"
 int ot;
@@ -28,10 +27,12 @@ int CheckSum(char *word,int previous);
 void Configuracion(void);
 int GetSignal(int intentos_signal_max);
 void LedSignal();
-void SaveNumberEEPROM(int position);
-void SaveHourEEPROM(int position);
+int SaveNumberEEPROM(int position,int cycles);
+int SaveHourEEPROM(int position,int cycles);
 void PreguntarNumero(int indicesms);
 void PreguntarHora(int indicesms);
+void DialfromEEPROM(int pos);
+void HangCall(void);
 //Interrupt
 void interrupt isr() 
 {  
@@ -46,71 +47,34 @@ void interrupt isr()
         __delay_ms(100);
         __delay_ms(100);
         RA2=1;
-        char *xg="HALLO";
-        char num;
-        char numero[11];
-        int checksum=0;
-        int intentos=3;
-        int iactual=0;
-        int got=0;
-        int sendok=0;
         int sms;
-        if(ot==1)
-        {
-            ot=OpenTCPIP("181.58.30.155","23");//Open socket
-            if(ot==1)
-            {
-                for(i=1;i<12;i++)
-                {
-                    num=ReadEEPROM(i);
-                    numero[i-1]=num;    //Read Number form EEPROM
-                }
-                ReenviarTCPIP:
-                /*SendATCPIP(numero,11); //Send array
-                checksum=CheckSum(numero,checksum);//Calculate checksum
-                SendcTCPIP(checksum);  //Send Checksum
-                got=WaitForChar(checksum,200,2);*///Hat for checksum back
-                CommandSendTCPIP();
-                for(i=1;i<12;i++)
-                {
-                    WriteUSART(numero[i-1]);    //Read Number form EEPROM
-                    while(BusyUSART());
-                }
-                checksum=CheckSum(numero,checksum);
-                cleanUSART();
-                WriteUSART(checksum);
-                sendok=CommandEndTCPIP();
-                while(BusyUSART());
-                CLRWDT();
-                got=WaitForChar(checksum,200,2);//Hat for checksum back*/
-                checksum=0;
-                if(got==1)
-                {
-                    iactual=0;  //If checksum was received, get out
-                }
-                else
-                {
-                    if(iactual<=intentos)
-                    {
-                        iactual++;
-                        goto ReenviarTCPIP; //Try again, but only intentos+1 times
-                    }
-                    else
-                    {
-                        iactual=0;
-                    }
-                }
-            }
+        INTF=0;
+            CLRWDT();
+            DialfromEEPROM(0x20);
+            __delay_ms(12000);
+            /*__delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);
+            __delay_ms(1000);*/
+            HangCall();
             
-            ot=CloseTCPIP();
-            INTF=0;
+        /*if(ot==1)
+        {
+            
             sms=CommandSendSMS("3142430050");
             cleanUSART();
             putsUSART("Hallo mein Nigga");
             while(BusyUSART());
             sms=CommandEndSMS(200);
             CLRWDT();
-        }
+        }*/
     }
     
     
@@ -125,12 +89,9 @@ void main(void)
     int cre=0;
     int residuo1=0;
     int residuo2=0;
-    int checknum=0;
     Configuracion();                //Configurate ports, Timers etc.
     OpenUSART(config,34);           //Opens UART module
     cleanUSART();                   //Cleans Usart before usig it
-    ot=InitTCPIP(10,2,"internet.movistar.com.co");//Initialize TCPIP communication with Movistar SIM CARD, 10 attempts
-    //WritesEEPROM("3142430050",1);       //Write number in EEPROM, position 1.
     cre=CheckCREG(3);
     cre=ConfigSMS();
     if(cre==1)
@@ -165,7 +126,7 @@ void main(void)
             }
             if(residuo2==0)             //Only check signal after 8 timer2 cycles and the module is on
             {
-                PreguntarNumero(1);
+                PreguntarNumero(6);
                 PreguntarHora(2);
             }
             LedSignal();            // LED routines
@@ -323,46 +284,104 @@ int CheckSum(char *word,int previous)
     }
     return sum;
 }
-void SaveNumberEEPROM(int position)
+int SaveNumberEEPROM(int position,int cycles)
 {
     int j=0;
+    int donesave=0;
+    int intento_actual=0;
     char c;
-    char array[10];
-    for(j=0;j<10;j++)
+    char array[80];
+    for(j=0;j<80;j++)
     {
         fst:
         if(RCIF)
         {
            c=ReadUSART();
            array[j]=c;
+           if(c=='0'|c=='1'|c=='2'|c=='3'|c=='4'|c=='5'|c=='6'|c=='7'|c=='8'|c=='9')
+           {
+               donesave=1;
+           }
+           else
+           {
+               donesave=0;
+               goto outsave;
+           }
         }
-        else
-        {
+        else //Keep waitinf for data in USART
+        {   
+            if(TMR2IF==1)
+            {
+                TMR2IF=0;
+                if(intento_actual==cycles)
+                {
+                    intento_actual=0;
+                    donesave=0;
+                    goto outsave;
+                }
+                else
+                {
+                    intento_actual++;
+                    goto fst;
+                }
+                            
+            }
             goto fst;
         }
     }
     WritesEEPROM(array,position);
+    outsave:
+    return donesave;
 }
 
-void SaveHourEEPROM(int position)
+int SaveHourEEPROM(int position,int cycles)
 {
     int j=0;
+    int donesaveh=0;
+    int intento_actual=0;
     char c;
     char array[6];
     for(j=0;j<6;j++)
     {
-        fst:
+        fsth:
         if(RCIF)
         {
            c=ReadUSART();
            array[j]=c;
+           if(c=='0'|c=='1'|c=='2'|c=='3'|c=='4'|c=='5'|c=='6'|c=='7'|c=='8'|c=='9')
+           {
+               donesaveh=1;
+           }
+           else
+           {
+               donesaveh=0;
+               goto outsaveh;
+           }
         }
-        else
-        {
-            goto fst;
+        else //Keep waitinf for data in USART
+        {   
+            if(TMR2IF==1)
+            {
+                TMR2IF=0;
+                if(intento_actual==cycles)
+                {
+                    intento_actual=0;
+                    donesaveh=0;
+                    goto outsaveh;
+                }
+                else
+                {
+                    intento_actual++;
+                    goto fsth;
+                }
+                            
+            }
+            goto fsth;
         }
     }
     WritesEEPROM(array,position);
+    outsaveh:
+    return donesaveh;
 }
 
 
@@ -370,20 +389,24 @@ void SaveHourEEPROM(int position)
 void PreguntarNumero(int indicesms)
 {
     int checknum=0;
+    int checksave=0;
     cleanUSART();
     ReadSMS(indicesms);
     checknum=WaitForString("NUM",20,200,2);
     //check=WaitForChar('R',20,2);
     if(checknum==1)
     {
-        SaveNumberEEPROM(16);
+        checksave=SaveNumberEEPROM(0x20,20);
+        if(checksave==1)
+        {
         RA2=1;
         __delay_ms(100);
         __delay_ms(100);
         __delay_ms(100);
         __delay_ms(100);
         __delay_ms(100);
-       RA2=0;
+        RA2=0;
+        }
     }
                 
 }
@@ -394,10 +417,9 @@ void PreguntarHora(int indicesms)
     cleanUSART();
     ReadSMS(indicesms);
     checknum=WaitForString("HORA",20,200,2);
-    //check=WaitForChar('R',20,2);
     if(checknum==1)
     {
-        SaveNumberEEPROM(0x20);
+        SaveHourEEPROM(0x70,20);
         RA2=1;
         __delay_ms(100);
         __delay_ms(100);
@@ -407,4 +429,31 @@ void PreguntarHora(int indicesms)
        RA2=0;
     }
                 
+}
+
+void DialfromEEPROM(int pos)
+{
+    int i=0;
+    char numero[12];   
+    for(i=0;i<10;i++)
+    {
+        numero[i]=ReadEEPROM(pos);
+        pos++;
+    }
+    numero[10]=';';
+    numero[11]='\0';
+    cleanUSART();
+    putsUSARTNNull("ATD");
+    while(BusyUSART());
+    putsUSARTNNull(numero);
+    while(BusyUSART());
+    putsUSART("\r\n");
+    while(BusyUSART());
+}
+
+void HangCall(void)
+{
+    cleanUSART();
+    putsUSART("ATH\r\n");
+    while(BusyUSART());
 }
