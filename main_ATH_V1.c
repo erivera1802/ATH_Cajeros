@@ -22,6 +22,10 @@ int signal=1;
 int signala2=1;
 int c1=0;
 int cycles_per_signal=15;
+    int Hora;
+    int Minuto;
+    int Segundo;
+char numero[11];
 //Prototypes
 int CheckSum(char *word,int previous);
 void Configuracion(void);
@@ -33,6 +37,8 @@ void PreguntarNumero(int indicesms);
 void PreguntarHora(int indicesms);
 void DialfromEEPROM(int pos);
 void HangCall(void);
+int AskHourNetwork(int intentos_hora_max);
+void ReadHourEEPROM(int posi);
 //Interrupt
 void interrupt isr() 
 {  
@@ -84,16 +90,23 @@ void main(void)
     CLRWDT();
     unsigned char config=0x3C;      //Config word for OpenUSART function
     int prendido=1;                 //Modem off or on
+    int i=0;
+    char n2[11];
     int try_signal_max=3;           //Max number of attempts to check for signal
-    int task=0;                     //Variable for signal change after the LED cycle
+    unsigned long int task=0;                     //Variable for signal change after the LED cycle
     int cre=0;
-    int residuo1=0;
-    int residuo2=0;
+    int residuo1=0;                 //Variable for cycles until first action
+    int residuo2=0;                 //Variable for cycles until second action
+    int hor;
+        int Hora2;
+    int Minuto2;
+    int Segundo2;
     Configuracion();                //Configurate ports, Timers etc.
     OpenUSART(config,34);           //Opens UART module
-    cleanUSART();                   //Cleans Usart before usig it
-    cre=CheckCREG(3);
-    cre=ConfigSMS();
+    cleanUSART();                   //Cleans Usart before using it
+    cre=CheckCREG(3);               //Check for AT+CREG
+    cre=ConfigSMS();                //Configurate SMS
+    cre=ConfigHour();
     if(cre==1)
     {
         RA2=1;
@@ -119,19 +132,24 @@ void main(void)
                 signala2=GetSignal(try_signal_max);//Ask for signal strength
             }
             
-            residuo2=task%80;
-            if(residuo1==0 & residuo2==0)
+            residuo2=task%80;           //Only read messages after 80 timer2 cycles and the module is on       
+            if(residuo1==0 && residuo2==0)
             {
                 __delay_ms(10);
             }
-            if(residuo2==0)             //Only check signal after 8 timer2 cycles and the module is on
+            if(residuo2==0)             //Only read messages after 80 timer2 cycles and the module is on 
             {
                 PreguntarNumero(6);
-                PreguntarHora(2);
+                __delay_ms(100);
+                PreguntarHora(8);
+                hor=AskHourNetwork(3);
+                Hora2=Hora;
+                Minuto2=Minuto;
+                Segundo2=Segundo;
             }
             LedSignal();            // LED routines
             task=task+1;    //Count task
-            if(task==240)     //8 is the number of timer cycles it waits for checking signal strength
+            if(task==240)     //Reset task variable, for another cycle
             {
                 task=0;     //After that, reset task
             }
@@ -196,7 +214,7 @@ void LedSignal()
                         c1=c1+1;
                     }
 
-                    else if(c1<cycles_per_signal & c1!=0)//After, Turn Of Led
+                    else if(c1<cycles_per_signal && c1!=0)//After, Turn Off Led
                     {
                         RA2=0;
                         
@@ -216,12 +234,12 @@ void LedSignal()
             {
                 
                     TMR2IF=0;
-                    if(c1==0 | c1==2) //Two led flashes
+                    if(c1==0 || c1==2) //Two led flashes
                     {
                         RA2=1;
                         c1=c1+1;
                     }
-                    else if(c1==1 | c1<cycles_per_signal)//Turn Off Led
+                    else if(c1==1 || c1<cycles_per_signal)//Turn Off Led
                     {
                         RA2=0;
                         c1=c1+1;
@@ -237,12 +255,12 @@ void LedSignal()
             else if(signal==3)
             {
                     TMR2IF=0;
-                    if(c1==0 | c1==2 | c1==4) //Three Led Flashes
+                    if(c1==0 || c1==2 || c1==4) //Three Led Flashes
                     {
                         RA2=1;
                         c1=c1+1;
                     }
-                    else if(c1==1 |c1==3| c1<cycles_per_signal)//Turn Off Led
+                    else if(c1==1 ||c1==3|| c1<cycles_per_signal)//Turn Off Led
                     {
                         RA2=0;
                         c1=c1+1;
@@ -290,20 +308,21 @@ int SaveNumberEEPROM(int position,int cycles)
     int donesave=0;
     int intento_actual=0;
     char c;
-    char array[80];
-    for(j=0;j<80;j++)
+    char array[71];
+    for(j=0;j<70;j++)
     {
         fst:
         if(RCIF)
         {
            c=ReadUSART();
            array[j]=c;
-           if(c=='0'|c=='1'|c=='2'|c=='3'|c=='4'|c=='5'|c=='6'|c=='7'|c=='8'|c=='9')
+           if(c=='0'||c=='1'||c=='2'||c=='3'||c=='4'||c=='5'||c=='6'||c=='7'||c=='8'||c=='9')
            {
                donesave=1;
            }
            else
            {
+               NOP();
                donesave=0;
                goto outsave;
            }
@@ -329,7 +348,13 @@ int SaveNumberEEPROM(int position,int cycles)
             goto fst;
         }
     }
+    array[70]='\0';
     WritesEEPROM(array,position);
+    for(j=0;j<10;j++)
+    {
+        numero[j]=array[j];
+    }
+    numero[10]='\0';
     outsave:
     return donesave;
 }
@@ -340,15 +365,15 @@ int SaveHourEEPROM(int position,int cycles)
     int donesaveh=0;
     int intento_actual=0;
     char c;
-    char array[6];
-    for(j=0;j<6;j++)
+    char array[13];
+    for(j=0;j<12;j++)
     {
         fsth:
         if(RCIF)
         {
            c=ReadUSART();
            array[j]=c;
-           if(c=='0'|c=='1'|c=='2'|c=='3'|c=='4'|c=='5'|c=='6'|c=='7'|c=='8'|c=='9')
+           if(c=='0'||c=='1'||c=='2'||c=='3'||c=='4'||c=='5'||c=='6'||c=='7'||c=='8'||c=='9')
            {
                donesaveh=1;
            }
@@ -379,6 +404,7 @@ int SaveHourEEPROM(int position,int cycles)
             goto fsth;
         }
     }
+    array[12]='\0';
     WritesEEPROM(array,position);
     outsaveh:
     return donesaveh;
@@ -414,19 +440,23 @@ void PreguntarNumero(int indicesms)
 void PreguntarHora(int indicesms)
 {
     int checknum=0;
+    int checksaveh=0;
     cleanUSART();
     ReadSMS(indicesms);
     checknum=WaitForString("HORA",20,200,2);
     if(checknum==1)
     {
-        SaveHourEEPROM(0x70,20);
-        RA2=1;
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-       RA2=0;
+        checksaveh=SaveHourEEPROM(0x70,20);
+        if(checknum==1)
+        {
+            RA2=1;
+            __delay_ms(100);
+            __delay_ms(100);
+            __delay_ms(100);
+            __delay_ms(100);
+            __delay_ms(100);
+            RA2=0;
+        }
     }
                 
 }
@@ -456,4 +486,282 @@ void HangCall(void)
     cleanUSART();
     putsUSART("ATH\r\n");
     while(BusyUSART());
+}
+
+/*int AskHourNetwork(int intentos_hora_max)
+{
+    int intentos_hora_actual=0;
+    char h;
+    int c;                    
+    int r=0;
+    char g;
+    char Hd;
+    char Hu;
+    char Md;
+    char Mu;
+    char Sd;
+    char Su;
+    int horaa=0;
+    
+    cleanUSART();       //Avoiding overrun error
+    putsUSART("AT+CCLK?\r\n");//Signal request
+    while(BusyUSART());
+    ReadInicialH:
+    if( DataRdyUSART)       //Wait for response 
+    {   
+        rth:
+        r=0;
+        c=ReadUSART();         //Get characters
+        
+        if(c==',')              //When I get space, I am ready for the signal
+        {    
+            ReadH:
+            if(DataRdyUSART==1) //Wait till first hour digit
+            {
+                Hd=ReadUSART();
+                Read2H:
+                if(DataRdyUSART==1)//Wait till second hour digit
+                {
+                    Hu=ReadUSART();
+                    horaa=1;
+                    WaitForChar(':',20,2);
+                    Read3H:
+                    if(DataRdyUSART==1)
+                    {
+                        Md=ReadUSART();
+                        Read4H:
+                        if(DataRdyUSART==1)
+                        {
+                            Mu=ReadUSART();
+                            WaitForChar(':',20,2);
+                            Read5H:
+                            if(DataRdyUSART==1)
+                            {
+                                Sd=ReadUSART();
+                                Read6H:
+                                if(DataRdyUSART==1)
+                                {
+                                    Su=ReadUSART();
+                                    horaa=1;
+                                    goto chaoh;
+                                }
+                                else
+                                {
+                                    goto Read6H;
+                                }
+                            }
+                            else
+                            {
+                                goto Read5H;
+                            }
+                        }
+                        else
+                        {
+                            goto Read4H;
+                        }
+                    }
+                    else
+                    {
+                        goto Read3H;
+                    }
+
+                }
+                else //Keep waiting for space
+                {
+                    goto Read2H;
+                }
+            }
+            else
+            {
+                goto ReadH;
+            }
+        }
+        else //Keep waiting for space
+        {
+            goto ReadInicialH;
+        }  
+    }
+    else //Keep waitinf for data in USART
+    {   
+        if(TMR2IF==1)
+        {
+            TMR2IF=0;
+            if(intentos_hora_actual==intentos_hora_max)
+            {
+                intentos_hora_actual=0;
+                horaa=0;
+                goto chaoh;
+            }
+            else
+            {
+                intentos_hora_actual++;
+                goto ReadInicialH;
+            }
+                            
+        }
+        goto ReadInicialH;
+    }        
+    chaoh:
+    Hd=Hd&0x0f;
+    Hu=Hu&0x0f;
+    Hd=Hd<<4;
+    Hd=Hd+Hu;
+    Hora=Hd;
+    
+    Md=Md&0x0f;
+    Mu=Mu&0x0f;
+    Md=Md<<4;
+    Md=Md+Mu;
+    Minuto=Md;
+    
+    Sd=Sd&0x0f;
+    Su=Su&0x0f;
+    Sd=Sd<<4;
+    Sd=Sd+Su;
+    Segundo=Sd;
+    return horaa;
+}*/
+
+int AskHourNetwork(int intentos_hora_max)
+{
+    int intentos_hora_actual=0;
+    char h;
+    int c;                    
+    int r=0;
+    char g;
+    char Hd;
+    char Hu;
+    char Md;
+    char Mu;
+    char Sd;
+    char Su;
+    int horaa=0;
+    int car=0;
+    cleanUSART();       //Avoiding overrun error
+    putsUSART("AT+CCLK?\r\n");//Signal request
+    while(BusyUSART());
+    car=WaitForChar(',',5,2);
+    if(car==1)
+    {
+        
+            ReadH:
+            if(DataRdyUSART==1) //Wait till first hour digit
+            {
+                Hd=ReadUSART();
+                Read2H:
+                if(DataRdyUSART==1)//Wait till second hour digit
+                {
+                    Hu=ReadUSART();
+                    horaa=1;
+                    WaitForChar(':',20,2);
+                    Read3H:
+                    if(DataRdyUSART==1)
+                    {
+                        Md=ReadUSART();
+                        Read4H:
+                        if(DataRdyUSART==1)
+                        {
+                            Mu=ReadUSART();
+                            WaitForChar(':',20,2);
+                            Read5H:
+                            if(DataRdyUSART==1)
+                            {
+                                Sd=ReadUSART();
+                                Read6H:
+                                if(DataRdyUSART==1)
+                                {
+                                    Su=ReadUSART();
+                                    horaa=1;
+                                    goto chaoh;
+                                }
+                                else
+                                {
+                                    goto Read6H;
+                                }
+                            }
+                            else
+                            {
+                                goto Read5H;
+                            }
+                        }
+                        else
+                        {
+                            goto Read4H;
+                        }
+                    }
+                    else
+                    {
+                        goto Read3H;
+                    }
+
+                }
+                else //Keep waiting for space
+                {
+                    goto Read2H;
+                }
+            }
+            else
+            {
+                goto ReadH;
+            }
+        }
+    chaoh:
+    Hd=Hd&0x0f;
+    Hu=Hu&0x0f;
+    Hd=Hd<<4;
+    Hd=Hd+Hu;
+    Hora=Hd;
+    
+    Md=Md&0x0f;
+    Mu=Mu&0x0f;
+    Md=Md<<4;
+    Md=Md+Mu;
+    Minuto=Md;
+    
+    Sd=Sd&0x0f;
+    Su=Su&0x0f;
+    Sd=Sd<<4;
+    Sd=Sd+Su;
+    Segundo=Sd;
+    return horaa;
+}
+
+void ReadHourEEPROM(int posi)
+{
+    char Hde;
+    char Hue;
+    char Mde;
+    char Mue;
+    char Sde;
+    char Sue;
+    Hde=ReadEEPROM(posi);
+    posi++;
+    Hue=ReadEEPROM(posi);
+    posi++;
+    Mde=ReadEEPROM(posi);
+    posi++;
+    Mue=ReadEEPROM(posi);
+    posi++;
+    Sde=ReadEEPROM(posi);
+    posi++;
+    Sue=ReadEEPROM(posi);
+    posi++;
+    
+    Hde=Hde&0x0f;
+    Hue=Hue&0x0f;
+    Hde=Hde<<4;
+    Hde=Hde+Hue;
+    Hora=Hde;
+    
+    Mde=Mde&0x0f;
+    Mue=Mue&0x0f;
+    Mde=Mde<<4;
+    Mde=Mde+Mue;
+    Minuto=Mde;
+    
+    Sde=Sde&0x0f;
+    Sue=Sue&0x0f;
+    Sde=Sde<<4;
+    Sde=Sde+Sue;
+    Segundo=Sde;
 }
