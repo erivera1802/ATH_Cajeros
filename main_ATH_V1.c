@@ -4,8 +4,6 @@
  *
  * Created on 22 de septiembre de 2016, 07:41 AM
  */
-
-
 #include <xc.h>     
 #include <pic16f1827.h>
 #include <stdlib.h>
@@ -22,9 +20,18 @@ int signal=1;
 int signala2=1;
 int c1=0;
 int cycles_per_signal=15;
-    int Hora;
-    int Minuto;
-    int Segundo;
+//Variables de tiempo de network
+int Hora;
+int Minuto;
+int Segundo;
+//Variables de tiempo Eeprom. A apertura, C cierre
+int Horaea=0;
+int Minutoea=0;
+int Segundoea=0;
+int Horaec=0;
+int Minutoec=0;
+int Segundoec=0;
+
 char numero[11];
 //Prototypes
 int CheckSum(char *word,int previous);
@@ -39,6 +46,7 @@ void DialfromEEPROM(int pos);
 void HangCall(void);
 int AskHourNetwork(int intentos_hora_max);
 void ReadHourEEPROM(int posi);
+int CheckHour(void);
 //Interrupt
 void interrupt isr() 
 {  
@@ -98,9 +106,10 @@ void main(void)
     int residuo1=0;                 //Variable for cycles until first action
     int residuo2=0;                 //Variable for cycles until second action
     int hor;
-        int Hora2;
+    int Hora2;
     int Minuto2;
     int Segundo2;
+    int mult;
     Configuracion();                //Configurate ports, Timers etc.
     OpenUSART(config,34);           //Opens UART module
     cleanUSART();                   //Cleans Usart before using it
@@ -140,14 +149,23 @@ void main(void)
             if(residuo2==0)             //Only read messages after 80 timer2 cycles and the module is on 
             {
                 PreguntarNumero(6);
-                __delay_ms(100);
-                PreguntarHora(8);
+                PreguntarHora(5);
                 hor=AskHourNetwork(3);
-                Hora2=Hora;
-                Minuto2=Minuto;
-                Segundo2=Segundo;
+                ReadHourEEPROM(0x70);
+                Hora2=Horaec;
+                Minuto2=Minutoec;
+                Segundo2=Segundoec;
+                mult=CheckHour();
+                if(mult==1)
+                {
+                    RA2=1;
+                }
+                else if(mult==0)
+                {
+                    RA2=0;
+                }
             }
-            LedSignal();            // LED routines
+            //LedSignal();            // LED routines
             task=task+1;    //Count task
             if(task==240)     //Reset task variable, for another cycle
             {
@@ -206,97 +224,89 @@ void Configuracion(void)
 void LedSignal()
 {
     if(signal==1)   //Signal low
-            {
-                    TMR2IF=0;
-                    if(c1==0)   //First time, Turn On led
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
+    {
+        TMR2IF=0;
+        if(c1==0)   //First time, Turn On led
+        {
+            RA2=1;
+            c1=c1+1;
+        }
+        else if(c1<cycles_per_signal && c1!=0)//After, Turn Off Led
+        {
+            RA2=0;
+            c1=c1+1;
+        }
+        else if (c1==cycles_per_signal)
+        {
+            c1=0;       //Reset cycle
+            signal=signala2;//Reload signal variable 
+        }
+    }
 
-                    else if(c1<cycles_per_signal && c1!=0)//After, Turn Off Led
-                    {
-                        RA2=0;
-                        
-                        c1=c1+1;
-                    }
-                    else if (c1==cycles_per_signal)
-                    {
-                        c1=0;       //Reset cycle
-                        signal=signala2;//Reload signal variable 
-                    }
-
+    else if(signal==2)  //Signal medium
+    {          
+        TMR2IF=0;
+        if(c1==0 || c1==2) //Two led flashes
+        {
+            RA2=1;
+            c1=c1+1;
+        }
+        else if(c1==1 || c1<cycles_per_signal)//Turn Off Led
+        {
+            RA2=0;
+            c1=c1+1;
+        }
+        else
+        {
+            RA2=0;  
+            c1=0;   //Reset cycle
+            signal=signala2;//Reload signal variable 
+        }
                 
-
-            }
-
-            else if(signal==2)  //Signal medium
-            {
+    }
+    else if(signal==3)
+    {
+        TMR2IF=0;
+        if(c1==0 || c1==2 || c1==4) //Three Led Flashes
+        {
+            RA2=1;
+            c1=c1+1;
+        }
+        else if(c1==1 ||c1==3|| c1<cycles_per_signal)//Turn Off Led
+        {
+            RA2=0;
+            c1=c1+1;
+        }
+        else
+        {
+            RA2=0;
+            c1=0;       //Reset cycle
+            signal=signala2;//Reload signal variable
+        }
                 
-                    TMR2IF=0;
-                    if(c1==0 || c1==2) //Two led flashes
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
-                    else if(c1==1 || c1<cycles_per_signal)//Turn Off Led
-                    {
-                        RA2=0;
-                        c1=c1+1;
-                    }
-                    else
-                    {
-                        RA2=0;  
-                        c1=0;   //Reset cycle
-                        signal=signala2;//Reload signal variable 
-                    }
-                
-            }
-            else if(signal==3)
-            {
-                    TMR2IF=0;
-                    if(c1==0 || c1==2 || c1==4) //Three Led Flashes
-                    {
-                        RA2=1;
-                        c1=c1+1;
-                    }
-                    else if(c1==1 ||c1==3|| c1<cycles_per_signal)//Turn Off Led
-                    {
-                        RA2=0;
-                        c1=c1+1;
-                    }
-                    else
-                    {
-                        RA2=0;
-                        c1=0;       //Reset cycle
-                        signal=signala2;//Reload signal variable
-                    }
-                
-            }
+    }
     
     else if(signal==0)
-            {
-                    TMR2IF=0;
-                    if(c1<cycles_per_signal)//Turn Off Led
-                    {
-                        RA2=0;
-                        c1=c1+1;
-                    }
-                    else
-                    {
-                        RA2=0;
-                        c1=0;       //Reset cycle
-                        signal=signala2;//Reload signal variable
-                    }
-                
-            }
+    {
+        TMR2IF=0;
+        if(c1<cycles_per_signal)//Turn Off Led
+        {
+            RA2=0;
+            c1=c1+1;
+        }
+        else
+        {
+            RA2=0;
+            c1=0;       //Reset cycle
+            signal=signala2;//Reload signal variable
+        }           
+    }
 }
 int CheckSum(char *word,int previous)
 {
     int sum=previous;
     while(*word!='\0')
-    {
-        
+    {        
         sum=sum+*word;
         word++;
     }
@@ -322,7 +332,6 @@ int SaveNumberEEPROM(int position,int cycles)
            }
            else
            {
-               NOP();
                donesave=0;
                goto outsave;
            }
@@ -642,8 +651,7 @@ int AskHourNetwork(int intentos_hora_max)
     while(BusyUSART());
     car=WaitForChar(',',5,2);
     if(car==1)
-    {
-        
+    {    
             ReadH:
             if(DataRdyUSART==1) //Wait till first hour digit
             {
@@ -751,17 +759,81 @@ void ReadHourEEPROM(int posi)
     Hue=Hue&0x0f;
     Hde=Hde<<4;
     Hde=Hde+Hue;
-    Hora=Hde;
+    Horaea=Hde;
     
     Mde=Mde&0x0f;
     Mue=Mue&0x0f;
     Mde=Mde<<4;
     Mde=Mde+Mue;
-    Minuto=Mde;
+    Minutoea=Mde;
     
     Sde=Sde&0x0f;
     Sue=Sue&0x0f;
     Sde=Sde<<4;
     Sde=Sde+Sue;
-    Segundo=Sde;
+    Segundoea=Sde;
+    
+    Hde=ReadEEPROM(posi);
+    posi++;
+    Hue=ReadEEPROM(posi);
+    posi++;
+    Mde=ReadEEPROM(posi);
+    posi++;
+    Mue=ReadEEPROM(posi);
+    posi++;
+    Sde=ReadEEPROM(posi);
+    posi++;
+    Sue=ReadEEPROM(posi);
+    
+    Hde=Hde&0x0f;
+    Hue=Hue&0x0f;
+    Hde=Hde<<4;
+    Hde=Hde+Hue;
+    Horaec=Hde;
+    
+    Mde=Mde&0x0f;
+    Mue=Mue&0x0f;
+    Mde=Mde<<4;
+    Mde=Mde+Mue;
+    Minutoec=Mde;
+    
+    Sde=Sde&0x0f;
+    Sue=Sue&0x0f;
+    Sde=Sde<<4;
+    Sde=Sde+Sue;
+    Segundoec=Sde;
+}
+
+int CheckHour(void)
+{
+    int accion=0;
+    unsigned long int Horasec=0;
+    unsigned long int Horasecea=0;
+    unsigned long int Horasecec=0;
+    Horasec=Hora*3600+Minuto*60+Segundo;
+    Horasecea=Horaea*3600+Minutoea*60+Segundoea;
+    Horasecec=Horaec*3600+Minutoec*60+Segundoec;
+    if(Horasecec>Horasecea)
+    {
+        if(Horasec<Horasecec && Horasec>Horasecea)
+        {
+            accion=1;
+        }
+        else
+        {
+            accion=0;
+        }
+    }
+    else if(Horasecec<Horasecea)
+    {
+        if(Horasec<Horasecea && Horasec>Horasecec)
+        {
+            accion=0;
+        }
+        else
+        {
+            accion=1;
+        }
+    }
+    return accion;  
 }
