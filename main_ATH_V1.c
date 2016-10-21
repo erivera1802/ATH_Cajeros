@@ -38,10 +38,12 @@ int CheckSum(char *word,int previous);
 void Configuracion(void);
 int GetSignal(int intentos_signal_max);
 void LedSignal();
-int SaveNumberEEPROM(int position,int cycles);
-int SaveHourEEPROM(int position,int cycles);
-void PreguntarNumero(int indicesms);
-void PreguntarHora(int indicesms);
+int SaveSomethingEEPROM(int position,int cycles,int some);
+//int SaveNumberEEPROM(int position,int cycles);
+//int SaveHourEEPROM(int position,int cycles);
+int PreguntaraSMS(int indicesms,int what);
+//void PreguntarNumero(int indicesms);
+//void PreguntarHora(int indicesms);
 void DialfromEEPROM(int pos);
 void HangCall(void);
 int AskHourNetwork(int intentos_hora_max);
@@ -106,10 +108,19 @@ void main(void)
     int residuo1=0;                 //Variable for cycles until first action
     int residuo2=0;                 //Variable for cycles until second action
     int hor;
-    int Hora2;
+    /*int Hora2;
     int Minuto2;
     int Segundo2;
-    int mult;
+    int Horaea2;
+    int Minutoea2;
+    int Segundoea2;
+    int Horaec2;
+    int Minutoec2;
+    int Segundoec2;*/
+    int configsms=0;
+    int mult=0;
+    int multanterior=0;
+    int index=0;
     Configuracion();                //Configurate ports, Timers etc.
     OpenUSART(config,34);           //Opens UART module
     cleanUSART();                   //Cleans Usart before using it
@@ -141,21 +152,58 @@ void main(void)
                 signala2=GetSignal(try_signal_max);//Ask for signal strength
             }
             
-            residuo2=task%80;           //Only read messages after 80 timer2 cycles and the module is on       
+            residuo2=task%400;           //Only read messages after 80 timer2 cycles and the module is on       
             if(residuo1==0 && residuo2==0)
             {
                 __delay_ms(10);
             }
             if(residuo2==0)             //Only read messages after 80 timer2 cycles and the module is on 
             {
-                PreguntarNumero(6);
-                PreguntarHora(5);
+                //PreguntarNumero(6);
+                //PreguntarHora(5);
+                for(index=1;index<3;index++)
+                {
+                    configsms=PreguntaraSMS(index,0);
+                    
+                    if(configsms==1)
+                    {
+                        CLRWDT();
+                        DialfromEEPROM(0x20);
+                        __delay_ms(12000);
+                        HangCall();
+                    }
+                    configsms=PreguntaraSMS(index,1);
+                    if(configsms==1)
+                    {
+                        CLRWDT();
+                        DialfromEEPROM(0x20);
+                        __delay_ms(12000);
+                        HangCall();
+                    }
+                }
+                
+                DeleteAllSMS();
                 hor=AskHourNetwork(3);
                 ReadHourEEPROM(0x70);
-                Hora2=Horaec;
-                Minuto2=Minutoec;
-                Segundo2=Segundoec;
+                /*Hora2=Hora;
+                Minuto2=Minuto;
+                Segundo2=Segundo;
                 mult=CheckHour();
+                Horaea2=Horaea;
+                Minutoea2=Minutoea;
+                Segundoea2=Segundoea;
+                Horaec2=Horaec;
+                Minutoec2=Minutoec;
+                Segundoec2=Segundoec;*/
+                mult=CheckHour();
+                if(mult!=multanterior)
+                {
+                    CLRWDT();
+                    DialfromEEPROM(0x20);
+                    __delay_ms(12000);
+                    HangCall();
+                }
+                multanterior=mult;
                 if(mult==1)
                 {
                     RA2=1;
@@ -167,7 +215,7 @@ void main(void)
             }
             //LedSignal();            // LED routines
             task=task+1;    //Count task
-            if(task==240)     //Reset task variable, for another cycle
+            if(task==800)     //Reset task variable, for another cycle
             {
                 task=0;     //After that, reset task
             }
@@ -312,7 +360,104 @@ int CheckSum(char *word,int previous)
     }
     return sum;
 }
-int SaveNumberEEPROM(int position,int cycles)
+
+int SaveSomethingEEPROM(int position,int cycles,int some)
+{
+    int j=0;
+    int donesave=0;
+    int intento_actual=0;
+    char c;
+    if(some==0)
+    {
+        char array[71];
+        for (j = 0; j < 70; j++) 
+        {
+            fst:
+            if (RCIF) {
+                c = ReadUSART();
+                array[j] = c;
+                if (c == '0' || c == '1' || c == '2' || c == '3' || c == '4' || c == '5' || c == '6' || c == '7' || c == '8' || c == '9') {
+                    donesave = 1;
+                } else {
+                    donesave = 0;
+                    goto outsave;
+                }
+            } 
+            else //Keep waitinf for data in USART
+            {
+                if (TMR2IF == 1) {
+                    TMR2IF = 0;
+                    if (intento_actual == cycles) {
+                        intento_actual = 0;
+                        donesave = 0;
+                        goto outsave;
+                    } else {
+                        intento_actual++;
+                        goto fst;
+                    }
+
+                }
+                goto fst;
+            }
+        }
+        array[70]='\0';
+        WritesEEPROM(array,position);
+        for(j=0;j<10;j++)
+        {
+            numero[j]=array[j];
+        }
+        numero[10]='\0';
+    }
+    if(some==1)
+    {
+        char array[13];
+        for(j=0;j<12;j++)
+        {
+            fsth:
+            if(RCIF)
+            {
+               c=ReadUSART();
+               array[j]=c;
+               if(c=='0'||c=='1'||c=='2'||c=='3'||c=='4'||c=='5'||c=='6'||c=='7'||c=='8'||c=='9')
+               {
+                   donesave=1;
+               }
+               else
+               {
+                   donesave=0;
+                   goto outsave;
+               }
+            }
+            else //Keep waitinf for data in USART
+            {   
+                if(TMR2IF==1)
+                {
+                    TMR2IF=0;
+                    if(intento_actual==cycles)
+                    {
+                        intento_actual=0;
+                        donesave=0;
+                        goto outsave;
+                    }
+                    else
+                    {
+                        intento_actual++;
+                        goto fsth;
+                    }
+
+                }
+                goto fsth;
+            }
+        }
+        array[12]='\0';
+        WritesEEPROM(array,position);
+    }
+    outsave:
+    return donesave;
+}
+
+
+/*int SaveNumberEEPROM(int position,int cycles)
 {
     int j=0;
     int donesave=0;
@@ -417,11 +562,43 @@ int SaveHourEEPROM(int position,int cycles)
     WritesEEPROM(array,position);
     outsaveh:
     return donesaveh;
+}*/
+
+
+int PreguntaraSMS(int indicesms,int what)
+{
+    int checknum=0;
+    int checksave=0;
+    int posi;
+    cleanUSART();
+    ReadSMS(indicesms);
+    if(what==0)
+    {
+        checknum=WaitForString("NUM",2,200,2);
+        posi=0x20;
+    }
+    else
+    {
+        checknum=WaitForString("HORA",2,200,2);
+        posi=0x70;
+    }
+    if(checknum==1)
+    {
+        checksave=SaveSomethingEEPROM(posi,20,what);
+        if(checksave==1)
+        {
+        RA2=1;
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        __delay_ms(100);
+        RA2=0;
+        }
+    }
+    return checksave;
 }
-
-
-
-void PreguntarNumero(int indicesms)
+/*void PreguntarNumero(int indicesms)
 {
     int checknum=0;
     int checksave=0;
@@ -431,7 +608,7 @@ void PreguntarNumero(int indicesms)
     //check=WaitForChar('R',20,2);
     if(checknum==1)
     {
-        checksave=SaveNumberEEPROM(0x20,20);
+        checksave=SaveSomethingEEPROM(0x20,20,0);
         if(checksave==1)
         {
         RA2=1;
@@ -455,7 +632,8 @@ void PreguntarHora(int indicesms)
     checknum=WaitForString("HORA",20,200,2);
     if(checknum==1)
     {
-        checksaveh=SaveHourEEPROM(0x70,20);
+        //checksaveh=SaveHourEEPROM(0x70,20);
+        checksaveh=SaveSomethingEEPROM(0x70,20,1);
         if(checknum==1)
         {
             RA2=1;
@@ -469,7 +647,7 @@ void PreguntarHora(int indicesms)
     }
                 
 }
-
+*/
 void DialfromEEPROM(int pos)
 {
     int i=0;
@@ -810,9 +988,9 @@ int CheckHour(void)
     unsigned long int Horasec=0;
     unsigned long int Horasecea=0;
     unsigned long int Horasecec=0;
-    Horasec=Hora*3600+Minuto*60+Segundo;
-    Horasecea=Horaea*3600+Minutoea*60+Segundoea;
-    Horasecec=Horaec*3600+Minutoec*60+Segundoec;
+    Horasec=Hora*0x3600+Minuto*0x60+Segundo;
+    Horasecea=Horaea*0x3600+Minutoea*0x60+Segundoea;
+    Horasecec=Horaec*0x3600+Minutoec*0x60+Segundoec;
     if(Horasecec>Horasecea)
     {
         if(Horasec<Horasecec && Horasec>Horasecea)
