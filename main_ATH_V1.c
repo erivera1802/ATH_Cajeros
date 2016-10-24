@@ -1,8 +1,12 @@
 /*
  * File:   mainlibtcp.c
- * Author: Esteban
+ * Author: Esteban Rivera Guerrero
  *
  * Created on 22 de septiembre de 2016, 07:41 AM
+ */
+/*
+ Pendientes:
+ * Rutina de encendido de modem (Con todo lo que conlleva)
  */
 #include <xc.h>     
 #include <pic16f1827.h>
@@ -31,6 +35,9 @@ int Segundoea=0;
 int Horaec=0;
 int Minutoec=0;
 int Segundoec=0;
+
+char numready;
+char hourready;
 
 char numero[11];
 //Prototypes
@@ -117,7 +124,8 @@ void main(void)
     int Horaec2;
     int Minutoec2;
     int Segundoec2;*/
-    int configsms=0;
+    int configsmshora=0;
+    int configsmsnumero=0;
     int mult=0;
     int multanterior=0;
     int index=0;
@@ -150,6 +158,11 @@ void main(void)
             if(residuo1==0)             //Only check signal after 8 timer2 cycles and the module is on
             {
                 signala2=GetSignal(try_signal_max);//Ask for signal strength
+                cre=CheckCREG(3);  //Ask for network registration
+                if(cre==0)
+                {
+                    signala2=4;
+                }
             }
             
             residuo2=task%400;           //Only read messages after 80 timer2 cycles and the module is on       
@@ -163,17 +176,17 @@ void main(void)
                 //PreguntarHora(5);
                 for(index=1;index<3;index++)
                 {
-                    configsms=PreguntaraSMS(index,0);
-                    
-                    if(configsms==1)
+                    configsmsnumero=PreguntaraSMS(index,0);
+                    configsmshora=PreguntaraSMS(index,1);
+                    if(configsmsnumero==1)
                     {
                         CLRWDT();
                         DialfromEEPROM(0x20);
                         __delay_ms(12000);
                         HangCall();
                     }
-                    configsms=PreguntaraSMS(index,1);
-                    if(configsms==1)
+
+                    if(configsmshora==1 && numready=='K')
                     {
                         CLRWDT();
                         DialfromEEPROM(0x20);
@@ -181,10 +194,15 @@ void main(void)
                         HangCall();
                     }
                 }
-                
                 DeleteAllSMS();
                 hor=AskHourNetwork(3);
-                ReadHourEEPROM(0x70);
+                numready=ReadEEPROM(0x10);
+                hourready=ReadEEPROM(0x11);
+                if(numready=='K' && hourready=='K')
+                {
+                    ReadHourEEPROM(0x70);
+                    mult=CheckHour();
+                }
                 /*Hora2=Hora;
                 Minuto2=Minuto;
                 Segundo2=Segundo;
@@ -195,15 +213,6 @@ void main(void)
                 Horaec2=Horaec;
                 Minutoec2=Minutoec;
                 Segundoec2=Segundoec;*/
-                mult=CheckHour();
-                if(mult!=multanterior)
-                {
-                    CLRWDT();
-                    DialfromEEPROM(0x20);
-                    __delay_ms(12000);
-                    HangCall();
-                }
-                multanterior=mult;
                 if(mult==1)
                 {
                     RA2=1;
@@ -212,6 +221,15 @@ void main(void)
                 {
                     RA2=0;
                 }
+                if(mult!=multanterior)
+                {
+                    CLRWDT();
+                    DialfromEEPROM(0x20);
+                    __delay_ms(12000);
+                    HangCall();
+                }
+                multanterior=mult;
+                
             }
             //LedSignal();            // LED routines
             task=task+1;    //Count task
@@ -345,6 +363,21 @@ void LedSignal()
         else
         {
             RA2=0;
+            c1=0;       //Reset cycle
+            signal=signala2;//Reload signal variable
+        }           
+    }
+    else if(signal==4)
+    {
+        TMR2IF=0;
+        if(c1<cycles_per_signal)//Turn Off Led
+        {
+            RA2=1;
+            c1=c1+1;
+        }
+        else
+        {
+            RA2=1;
             c1=0;       //Reset cycle
             signal=signala2;//Reload signal variable
         }           
@@ -587,13 +620,21 @@ int PreguntaraSMS(int indicesms,int what)
         checksave=SaveSomethingEEPROM(posi,20,what);
         if(checksave==1)
         {
-        RA2=1;
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        RA2=0;
+            RA2=1;
+            __delay_ms(100);
+            __delay_ms(100);
+            __delay_ms(100);
+            __delay_ms(100);
+            __delay_ms(100);
+            RA2=0;
+            if(what==0)
+            {
+                WriteEEPROM('K',0x10);
+            }
+            else if(what==1)
+            {
+                WriteEEPROM('K',0x11);
+            }
         }
     }
     return checksave;
