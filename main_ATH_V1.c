@@ -25,26 +25,34 @@ int signala2=1;
 int c1=0;
 int cycles_per_signal=15;
 //Variables de tiempo de network
-int Hora;
-int Minuto;
-int Segundo;
+ long int Hora;
+ long int Minuto;
+ long int Segundo;
 //Variables de tiempo Eeprom. A apertura, C cierre
-int Horaea=0;
-int Minutoea=0;
-int Segundoea=0;
-int Horaec=0;
-int Minutoec=0;
-int Segundoec=0;
+ long int Horaea=0;
+ long int Minutoea=0;
+ long int Segundoea=0;
+ long int Horaec=0;
+ long int Minutoec=0;
+ long int Segundoec=0;
 
+int ciclos_hora=8;
+unsigned int fallai=0;
+char fallac;
 char numready;
 char hourready;
-
+    int configsmshora=0;
+    int configsmsnumero=0;
 char numero[11];
+
+int sumapar=0;
+int sumaimpar=0;
+
 //Prototypes
-int CheckSum(char *word,int previous);
+void CheckSum(char *word,int numhour);
 void Configuracion(void);
-int GetSignal(int intentos_signal_max);
 void LedSignal();
+void CheckSumEEPROM(int pos,int numhour);
 int SaveSomethingEEPROM(int position,int cycles,int some);
 //int SaveNumberEEPROM(int position,int cycles);
 //int SaveHourEEPROM(int position,int cycles);
@@ -56,6 +64,7 @@ void HangCall(void);
 int AskHourNetwork(int intentos_hora_max);
 void ReadHourEEPROM(int posi);
 int CheckHour(void);
+int PowerOnModule(void);
 //Interrupt
 void interrupt isr() 
 {  
@@ -63,30 +72,10 @@ void interrupt isr()
     {
         CLRWDT();
         INTF=0;             //reset the interrupt flag
-        RA2=1;
-        __delay_ms(100);    //Led on for an Human-visible Timw
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        RA2=1;
-        int sms;
-        INTF=0;
             CLRWDT();
-            DialfromEEPROM(0x20);
-            __delay_ms(12000);
-            /*__delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);
-            __delay_ms(1000);*/
-            HangCall();
+            //DialfromEEPROM(0x20);
+            //__delay_ms(12000);
+            //HangCall();
             
         /*if(ot==1)
         {
@@ -98,8 +87,21 @@ void interrupt isr()
             sms=CommandEndSMS(200);
             CLRWDT();
         }*/
+        INTF=0;
     }
-    
+
+    if (IOCIF) 
+    {
+        IOCBF=0x00;
+        RA2=1;
+        __delay_ms(1000);
+        RA2=0;
+        IOCBF=0x00;
+        configsmsnumero=PreguntaraSMS(1,0);
+        configsmshora=PreguntaraSMS(1,1);
+        DeleteAllSMS();
+        IOCBF=0x00;
+    }
     
 }
 void main(void) 
@@ -114,6 +116,7 @@ void main(void)
     int cre=0;
     int residuo1=0;                 //Variable for cycles until first action
     int residuo2=0;                 //Variable for cycles until second action
+    int residuo3=0;
     int hor;
     /*int Hora2;
     int Minuto2;
@@ -124,37 +127,34 @@ void main(void)
     int Horaec2;
     int Minutoec2;
     int Segundoec2;*/
-    int configsmshora=0;
-    int configsmsnumero=0;
+    int check1=0;
+    int check2=0;
     int mult=0;
     int multanterior=0;
-    int index=0;
     Configuracion();                //Configurate ports, Timers etc.
     OpenUSART(config,34);           //Opens UART module
     cleanUSART();                   //Cleans Usart before using it
-    cre=CheckCREG(3);               //Check for AT+CREG
     cre=ConfigSMS();                //Configurate SMS
     cre=ConfigHour();
-    if(cre==1)
+    fallac=ReadEEPROM(0x80);
+    if(fallac==0xFF)
     {
-        RA2=1;
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        __delay_ms(100);
-        RA2=0;
+        fallai=0;
+    }
+    else
+    {
+        fallai=fallac;
     }
     CLRWDT();
     while(1)
     {
+        //PowerOnModule();
+        
         if(TMR2IF==1)               //When timer is overflow
         {
             CLRWDT();
             TMR2IF=0;               //Clear Flag
-            residuo1=task%8;
+            residuo1=task%80;
             if(residuo1==0)             //Only check signal after 8 timer2 cycles and the module is on
             {
                 signala2=GetSignal(try_signal_max);//Ask for signal strength
@@ -164,8 +164,7 @@ void main(void)
                     signala2=4;
                 }
             }
-            
-            residuo2=task%400;           //Only read messages after 80 timer2 cycles and the module is on       
+            residuo2=task%200;           //Only read messages after 80 timer2 cycles and the module is on       
             if(residuo1==0 && residuo2==0)
             {
                 __delay_ms(10);
@@ -174,45 +173,55 @@ void main(void)
             {
                 //PreguntarNumero(6);
                 //PreguntarHora(5);
-                for(index=1;index<3;index++)
+                if(configsmsnumero==1)
                 {
-                    configsmsnumero=PreguntaraSMS(index,0);
-                    configsmshora=PreguntaraSMS(index,1);
-                    if(configsmsnumero==1)
-                    {
-                        CLRWDT();
-                        DialfromEEPROM(0x20);
-                        __delay_ms(12000);
-                        HangCall();
-                    }
-
-                    if(configsmshora==1 && numready=='K')
-                    {
-                        CLRWDT();
-                        DialfromEEPROM(0x20);
-                        __delay_ms(12000);
-                        HangCall();
-                    }
+                    CLRWDT();
+                    DialfromEEPROM(0x20);
+                    __delay_ms(12000);
+                    HangCall();
+                    CheckSumEEPROM(0x20,0);
+                    configsmsnumero=0;
                 }
-                DeleteAllSMS();
-                hor=AskHourNetwork(3);
+                if(configsmshora==1 && numready=='K')
+                {
+                    CLRWDT();
+                    CheckSumEEPROM(0x70,1);
+                    check1=ReadEEPROM(0x7C);
+                    check2=ReadEEPROM(0x7D);
+                    check1=check1&0x0f;
+                    check2=check2&0x0f;
+                    if(sumapar==check1 && sumaimpar==check2)
+                    {
+                        DialfromEEPROM(0x20);
+                        __delay_ms(12000);
+                        HangCall();
+                        __delay_ms(3000);
+                    }
+                    else
+                    {
+                        DialfromEEPROM(0x48);
+                        __delay_ms(12000);
+                        HangCall();
+                        __delay_ms(3000);
+                    }
+                    configsmshora=0;
+                }                 
+            }
+            residuo3=task%ciclos_hora;
+            if((residuo1==0 && residuo3==0)||(residuo2==0 && residuo3==0))
+            {
+                __delay_ms(10);
+            }
+            if(residuo3==0)
+            {
                 numready=ReadEEPROM(0x10);
                 hourready=ReadEEPROM(0x11);
+                hor=AskHourNetwork(3);
                 if(numready=='K' && hourready=='K')
                 {
                     ReadHourEEPROM(0x70);
                     mult=CheckHour();
                 }
-                /*Hora2=Hora;
-                Minuto2=Minuto;
-                Segundo2=Segundo;
-                mult=CheckHour();
-                Horaea2=Horaea;
-                Minutoea2=Minutoea;
-                Segundoea2=Segundoea;
-                Horaec2=Horaec;
-                Minutoec2=Minutoec;
-                Segundoec2=Segundoec;*/
                 if(mult==1)
                 {
                     RA2=1;
@@ -227,10 +236,11 @@ void main(void)
                     DialfromEEPROM(0x20);
                     __delay_ms(12000);
                     HangCall();
+                    __delay_ms(3000);
                 }
                 multanterior=mult;
-                
             }
+            
             //LedSignal();            // LED routines
             task=task+1;    //Count task
             if(task==800)     //Reset task variable, for another cycle
@@ -282,6 +292,10 @@ void Configuracion(void)
     INTCONbits.INTE = 1; //enable the external interrupt 
     INTCONbits.GIE = 1;///set the Global Interrupt Enable
     
+    INTCONbits.IOCIE=1;
+    IOCBNbits.IOCBN4=1;
+    IOCBPbits.IOCBP4=0;
+    
     TMR2IF=0;                       //Clearing Flags
     PIR1=0x00;
     OSFIF=0;
@@ -308,7 +322,6 @@ void LedSignal()
             signal=signala2;//Reload signal variable 
         }
     }
-
     else if(signal==2)  //Signal medium
     {          
         TMR2IF=0;
@@ -327,8 +340,7 @@ void LedSignal()
             RA2=0;  
             c1=0;   //Reset cycle
             signal=signala2;//Reload signal variable 
-        }
-                
+        }           
     }
     else if(signal==3)
     {
@@ -348,10 +360,8 @@ void LedSignal()
             RA2=0;
             c1=0;       //Reset cycle
             signal=signala2;//Reload signal variable
-        }
-                
+        }       
     }
-    
     else if(signal==0)
     {
         TMR2IF=0;
@@ -383,7 +393,7 @@ void LedSignal()
         }           
     }
 }
-int CheckSum(char *word,int previous)
+/*int CheckSum(char *word,int previous)
 {
     int sum=previous;
     while(*word!='\0')
@@ -392,6 +402,70 @@ int CheckSum(char *word,int previous)
         word++;
     }
     return sum;
+}*/
+
+void CheckSum(char *word,int numhour)
+{
+    sumapar=0;
+    sumaimpar=0;
+    int h=0;
+    int tamano;
+    if(numhour==0)
+    {
+        tamano=70;
+    }
+    else
+    {
+        tamano=12;
+    }
+    for(h=0;h<tamano;h++)
+    {           
+        if(h%2==0)
+        {
+            sumapar=sumapar+*word;
+        }
+        else
+        {
+            sumaimpar=sumaimpar+*word;
+        }
+        word=word+1;
+    }
+    sumapar=sumapar&0x0f;
+    sumaimpar=sumaimpar&0x0f;
+    sumapar=sumapar+0x30;
+    sumaimpar=sumaimpar+0x30;
+}
+
+void CheckSumEEPROM(int pos,int numhour)
+{
+    int tamano=0;
+    int h=0;
+    char v;
+    sumapar=0;
+    sumaimpar=0;
+    if(numhour==0)
+    {
+        tamano=70;
+    }
+    else
+    {
+        tamano=12;
+    }
+    for(h=pos;h<pos+tamano;h++)
+    {
+        v=ReadEEPROM(h);
+        if(h%2==0)
+        {
+            sumapar=sumapar+v;
+        }
+        else
+        {
+            sumaimpar=sumaimpar+v;
+        }
+
+    }
+    sumapar=sumapar&0x0f;
+    sumaimpar=sumaimpar&0x0f;
 }
 
 int SaveSomethingEEPROM(int position,int cycles,int some)
@@ -402,29 +476,36 @@ int SaveSomethingEEPROM(int position,int cycles,int some)
     char c;
     if(some==0)
     {
-        char array[71];
-        for (j = 0; j < 70; j++) 
+        char array2[73];
+        for (j = 0; j < 72; j++) 
         {
             fst:
-            if (RCIF) {
+            if (RCIF) 
+            {
                 c = ReadUSART();
-                array[j] = c;
-                if (c == '0' || c == '1' || c == '2' || c == '3' || c == '4' || c == '5' || c == '6' || c == '7' || c == '8' || c == '9') {
+                array2[j] = c;
+                //if (c == '0' || c == '1' || c == '2' || c == '3' || c == '4' || c == '5' || c == '6' || c == '7' || c == '8' || c == '9') {
                     donesave = 1;
-                } else {
-                    donesave = 0;
-                    goto outsave;
-                }
+                //} 
+                //else 
+                //{
+                //    donesave = 0;
+                //    goto outsave;
+                //}
             } 
             else //Keep waitinf for data in USART
             {
-                if (TMR2IF == 1) {
+                if (TMR2IF == 1) 
+                {
                     TMR2IF = 0;
-                    if (intento_actual == cycles) {
+                    if (intento_actual == cycles) 
+                    {
                         intento_actual = 0;
                         donesave = 0;
                         goto outsave;
-                    } else {
+                    } 
+                    else 
+                    {
                         intento_actual++;
                         goto fst;
                     }
@@ -433,33 +514,37 @@ int SaveSomethingEEPROM(int position,int cycles,int some)
                 goto fst;
             }
         }
-        array[70]='\0';
-        WritesEEPROM(array,position);
-        for(j=0;j<10;j++)
+        array2[72]='\0';
+        CheckSum(array2,0);
+        if(sumapar==array2[70] && sumaimpar==array2[71])
         {
-            numero[j]=array[j];
+            WritesEEPROM(array2,position);
         }
-        numero[10]='\0';
+        else
+        {
+            donesave=0;
+            goto outsave;
+        }
     }
     if(some==1)
     {
-        char array[13];
-        for(j=0;j<12;j++)
+        char array2[15];
+        for(j=0;j<14;j++)
         {
             fsth:
             if(RCIF)
             {
                c=ReadUSART();
-               array[j]=c;
-               if(c=='0'||c=='1'||c=='2'||c=='3'||c=='4'||c=='5'||c=='6'||c=='7'||c=='8'||c=='9')
-               {
+               array2[j]=c;
+               //if(c=='0'||c=='1'||c=='2'||c=='3'||c=='4'||c=='5'||c=='6'||c=='7'||c=='8'||c=='9')
+               //{
                    donesave=1;
-               }
-               else
-               {
-                   donesave=0;
-                   goto outsave;
-               }
+               //}
+               //else
+               //{
+                 //  donesave=0;
+                  // goto outsave;
+               //}
             }
             else //Keep waitinf for data in USART
             {   
@@ -482,8 +567,19 @@ int SaveSomethingEEPROM(int position,int cycles,int some)
                 goto fsth;
             }
         }
-        array[12]='\0';
-        WritesEEPROM(array,position);
+        
+        
+        array2[14]='\0';
+        CheckSum(array2,1);
+        if(sumapar==array2[12] && sumaimpar==array2[13])
+        {
+            WritesEEPROM(array2,position);
+        }
+        else
+        {
+            donesave=0;
+            goto outsave;
+        }
     }
     outsave:
     return donesave;
@@ -602,6 +698,7 @@ int PreguntaraSMS(int indicesms,int what)
 {
     int checknum=0;
     int checksave=0;
+    char k=ReadEEPROM(0x10);
     int posi;
     cleanUSART();
     ReadSMS(indicesms);
@@ -620,13 +717,6 @@ int PreguntaraSMS(int indicesms,int what)
         checksave=SaveSomethingEEPROM(posi,20,what);
         if(checksave==1)
         {
-            RA2=1;
-            __delay_ms(100);
-            __delay_ms(100);
-            __delay_ms(100);
-            __delay_ms(100);
-            __delay_ms(100);
-            RA2=0;
             if(what==0)
             {
                 WriteEEPROM('K',0x10);
@@ -635,6 +725,14 @@ int PreguntaraSMS(int indicesms,int what)
             {
                 WriteEEPROM('K',0x11);
             }
+        }
+        else if(checksave==0 && k=='K')
+        {
+            CLRWDT();
+            DialfromEEPROM(0x48);
+            __delay_ms(12000);
+            HangCall();
+            __delay_ms(3000);
         }
     }
     return checksave;
@@ -852,11 +950,11 @@ void HangCall(void)
 
 int AskHourNetwork(int intentos_hora_max)
 {
-    int intentos_hora_actual=0;
+    /*int intentos_hora_actual=0;
     char h;
     int c;                    
     int r=0;
-    char g;
+    char g;*/
     char Hd;
     char Hu;
     char Md;
@@ -931,7 +1029,12 @@ int AskHourNetwork(int intentos_hora_max)
             {
                 goto ReadH;
             }
-        }
+    }
+    else
+    {
+       fallai++;
+       WriteEEPROM(fallai,0x80);
+    }
     chaoh:
     Hd=Hd&0x0f;
     Hu=Hu&0x0f;
@@ -1024,17 +1127,34 @@ void ReadHourEEPROM(int posi)
 }
 
 int CheckHour(void)
-{
+{ 
+    
     int accion=0;
-    unsigned long int Horasec=0;
-    unsigned long int Horasecea=0;
-    unsigned long int Horasecec=0;
+    long int Horasec=0;
+    long int Horasecea=0;
+    long int Horasecec=0;
+    long int Horacincoa=0;
+    long int Horacincoc=0;
+    long int Horaeac=0;
+    long int Horaecc=0;
+    long int Minutoeac=0;
+    long int diff1=0;
+    long int diff2=0;
     Horasec=Hora*0x3600+Minuto*0x60+Segundo;
     Horasecea=Horaea*0x3600+Minutoea*0x60+Segundoea;
     Horasecec=Horaec*0x3600+Minutoec*0x60+Segundoec;
+    /*if(Minutoea<0x05)
+    {
+        if(Horaea)
+        {
+            
+        }
+    }
+    Horacincoa=Horaea*0x3600+(Minutoea-0x05)*0x60+Segundoea;
+    Horacincoc=Horaec*0x3600+(Minutoec-0x05)*0x60+Segundoec;*/
     if(Horasecec>Horasecea)
     {
-        if(Horasec<Horasecec && Horasec>Horasecea)
+        if(Horasec<=Horasecec && Horasec>=Horasecea)
         {
             accion=1;
         }
@@ -1045,7 +1165,7 @@ int CheckHour(void)
     }
     else if(Horasecec<Horasecea)
     {
-        if(Horasec<Horasecea && Horasec>Horasecec)
+        if(Horasec<=Horasecea && Horasec>=Horasecec)
         {
             accion=0;
         }
@@ -1054,5 +1174,38 @@ int CheckHour(void)
             accion=1;
         }
     }
+    /*diff1=Horasecea-Horasec;
+    diff2=Horasecec-Horasec;
+    if((diff1<0x300 && diff1>=0) || (diff2<0x300 && diff2>=0))
+    {
+        ciclos_hora=8;
+    }
+    else
+    {
+        ciclos_hora=200;
+    }*/
+    ciclos_hora=8;
+
     return accion;  
+}
+
+int PowerOnModule(void)
+{
+    int st=0;
+    //Cambiar puertos
+    //RA0=1;//VBAT
+    __delay_ms(100);
+    RA2=1;//PWRKEY;
+    __delay_ms(54);
+    RA2=0;
+    __delay_ms(900);
+    if(RB0==1)
+    {
+        st=1;
+    }
+    else
+    {
+        st=0;
+    }
+    return st;
 }
